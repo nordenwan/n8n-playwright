@@ -1,86 +1,41 @@
-# --- 核心修改：使用与您版本号相同的、但基于 Debian 的镜像 ---
-FROM docker.n8n.io/n8nio/n8n
+# ----- STAGE 1: Builder -----
+# 构建您的自定义节点
+FROM node:20-alpine AS builder
 
-# Install WebKit dependencies
+RUN npm install -g pnpm
+WORKDIR /app
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY . .
+RUN pnpm run build
+
+# ----- STAGE 2: Final n8n Image -----
+# --- 使用 n8n 最新的、基于 Debian 的镜像 ---
+FROM docker.n8n.io/n8nio/n8n:latest-debian
+
+# 切换到 root 用户
 USER root
 
-# --- 新增：为 Debian Buster 修复软件源 ---
-# 因为 1.79.3 版本基于的 Debian Buster 已过期，需要指向归档服务器
-RUN sed -i 's/deb.debian.org/archive.debian.org/g' /etc/apt/sources.list && \
-    sed -i 's/security.debian.org/archive.debian.org/g' /etc/apt/sources.list && \
-    sed -i '/buster-updates/d' /etc/apt/sources.list
+# --- 使用 apt-get 安装依赖 ---
+# 这个命令在新的 Debian 镜像上可以正常工作
+RUN apt-get update && \
+    npx playwright install-deps chromium && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libwoff1 \
-    libopus0 \
-    libwebp6 \
-    libwebpdemux2 \
-    libenchant1c2a \
-    libgudev-1.0-0 \
-    libsecret-1-0 \
-    libhyphen0 \
-    libgdk-pixbuf2.0-0 \
-    libegl1 \
-    libnotify4 \
-    libxslt1.1 \
-    libevent-2.1-7 \
-    libgles2 \
-    libvpx6 \
-    libxcomposite1 \
-    libatk-bridge2.0-0 \
-    libatk1.0-0 \
-    libatspi2.0-0 \
-    libcairo2 \
-    libepoxy0 \
-    libfontconfig1 \
-    libfreetype6 \
-    libgbm1 \
-    libglib2.0-0 \
-    libharfbuzz0b \
-    libicu66 \
-    libjpeg8 \
-    libpango-1.0-0 \
-    libpangocairo-1.0-0 \
-    libpangoft2-1.0-0 \
-    libpixman-1-0 \
-    libpng16-16 \
-    libwayland-client0 \
-    libwayland-egl1 \
-    libwayland-server0 \
-    libx11-6 \
-    libdbus-glib-1-2 \
-    libxt6 \
-    libxcb1 \
-    libxext6 \
-    libxfixes3 \
-    libpci3 \
-    libasound2 \
-    libxi6 \
-    libxkbcommon0 \
-    libxrandr2 \
-    libxrender1 \
-    libxshmfence1 \
-    libgtk-3-0 \
-    fonts-liberation \
-    fonts-noto-color-emoji \
-    # 'ttf-ubuntu-font-family' 在 Debian 中不存在，我们移除它
-    # ttf-ubuntu-font-family \
-    && rm -rf /var/lib/apt/lists/*
+# 设置自定义节点的工作目录
+WORKDIR /home/node/.n8n_playwright/custom
 
-# Switch back to node user
+# 从 'builder' 阶段复制构建好的代码
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/package.json ./package.json
+
+# 只安装生产依赖
+RUN npm install --omit=dev && npm cache clean --force
+
+# 修正权限
+RUN chown -R node:node /home/node/.n8n_playwright
+
+# 切换回普通用户
 USER node
-
-# Set working directory
-WORKDIR /home/node/.n8n
-
-# Create a volume for persistent data
-VOLUME /home/node/.n8n
-
-# Expose port 5678
-EXPOSE 5678
-
-# Set environment variables
-ENV NODE_ENV=production
-
-# Use the default n8n command to start the application
-CMD ["n8n", "start"]
+WORKDIR /home/node/
