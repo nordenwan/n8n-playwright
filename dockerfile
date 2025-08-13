@@ -1,5 +1,5 @@
 # --- 核心修改：使用与您版本号相同的、但基于 Debian 的镜像 ---
-FROM docker.n8n.io/n8nio/n8n:1.79.3-debian
+FROM docker.n8n.io/n8nio/n8n
 
 # Install WebKit dependencies
 USER root
